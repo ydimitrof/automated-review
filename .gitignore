@@ -1,0 +1,6 @@
+node_modules/
+config.json
+state.json
+state.json.*.tmp
+review-instructions.md
+*.log

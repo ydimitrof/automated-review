@@ -1,0 +1,15 @@
+{
+  "//": "Copy to config.json and edit. reviewer MUST equal the gh-authenticated account (run: gh api user --jq .login), because reviews post as that account.",
+  "reviewer": "your-github-login",
+  "pollIntervalMinutes": 15,
+  "maxConcurrentReviews": 4,
+  "batchLines": 1500,
+  "demoMode": true,
+  "reviewInstructions": "file:./review-instructions.md",
+  "repos": [
+    {
+      "repo": "owner/repo",
+      "language": "both"
+    }
+  ]
+}
