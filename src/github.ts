@@ -1,7 +1,9 @@
 // GitHub I/O via the authenticated `gh` CLI, plus per-file patch parsing.
 
 import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { ChangedFile, PullRequest, ReviewComment, Verdict } from './types.js';
+import { log } from './logger.js';
 
 interface GhPr {
   number: number;
@@ -12,13 +14,35 @@ interface GhPr {
   headRefOid: string;
 }
 
-/**
- * Run `gh`, optionally writing `input` to its stdin (for `--input -`). Uses
- * spawn rather than execFile because execFile silently ignores an `input`
- * option, which would send an empty body. On non-zero exit the rejection
- * includes gh's stderr (e.g. the GitHub API error message).
- */
-function gh(args: string[], input?: string): Promise<string> {
+const GH_MAX_RETRIES = 5;
+const GH_BACKOFF_BASE_MS = 30_000; // secondary rate limits want ~minute-scale waits
+const GH_BACKOFF_MAX_MS = 300_000;
+
+/** Whether a gh failure is a transient/rate-limit error worth retrying. */
+export function isRetryableGhError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('secondary rate limit') ||
+    m.includes('temporarily blocked') ||
+    m.includes('rate limit') ||
+    m.includes('abuse detection') ||
+    m.includes('was submitted too quickly') ||
+    m.includes('http 429') ||
+    m.includes('http 500') ||
+    m.includes('http 502') ||
+    m.includes('http 503') ||
+    m.includes('http 504')
+  );
+}
+
+/** Exponential backoff (with 25% jitter), capped, for retry attempt `n` (1-based). */
+export function ghBackoffMs(attempt: number): number {
+  const exp = Math.min(GH_BACKOFF_MAX_MS, GH_BACKOFF_BASE_MS * 2 ** (attempt - 1));
+  return exp + Math.floor(exp * 0.25 * Math.random());
+}
+
+/** One `gh` invocation. Rejection message includes gh's stderr (the API error). */
+function runGh(args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('gh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
@@ -38,6 +62,28 @@ function gh(args: string[], input?: string): Promise<string> {
     if (input !== undefined) child.stdin.write(input);
     child.stdin.end();
   });
+}
+
+/**
+ * Run `gh` with retry on transient/rate-limit failures. Secondary-rate-limit
+ * errors mean the request was blocked (not performed), so retrying is safe —
+ * including for POSTs. Non-retryable errors throw immediately.
+ */
+function gh(args: string[], input?: string): Promise<string> {
+  const attempt = async (n: number): Promise<string> => {
+    try {
+      return await runGh(args, input);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (n > GH_MAX_RETRIES || !isRetryableGhError(message)) throw err;
+      const wait = ghBackoffMs(n);
+      const detail = (message.split('\n')[0] ?? message).slice(0, 160);
+      log.warn(`gh ${args[0]} ${args[1] ?? ''}: ${detail} — retry ${n}/${GH_MAX_RETRIES} in ${Math.round(wait / 1000)}s`);
+      await delay(wait);
+      return attempt(n + 1);
+    }
+  };
+  return attempt(1);
 }
 
 export async function listOpenPRs(repo: string): Promise<PullRequest[]> {

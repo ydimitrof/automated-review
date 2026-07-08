@@ -451,7 +451,7 @@ Piped/service logs are plain text (no color, no progress bars) automatically.
 | `HTTP 406 … diff exceeded 20000 lines` | Already handled — the bot uses the Files API, not `gh pr diff`. If you see this, you're on an old build. |
 | `agent did not submit a review` | The model didn't call `submit_review` for a batch. That batch is skipped and retried next pass; state is untouched. |
 | `dropped N off-diff inline comment(s)` | The model anchored comments to lines not in the diff; they're dropped so the post doesn't 422. Informational. |
-| Rate-limit / throttling errors | Lower `maxConcurrentReviews` (and/or raise `pollIntervalMinutes`). Coverage is unchanged. |
+| Rate-limit / throttling errors | GitHub secondary-rate-limit (403 "temporarily blocked"), 429, and 5xx errors are retried automatically with exponential backoff (up to 5 times, ~30s→5min). If they persist, lower `maxConcurrentReviews` and/or raise `pollIntervalMinutes`. Coverage is unchanged. |
 | Binary/oversized single files | Shown in the prompt but can't carry inline comments; they still count toward the review. |
 
 ---
@@ -488,3 +488,4 @@ npm test
 Covers PR filtering, per-file patch anchoring, batch packing, verdict merging,
 the concurrency semaphore, and progress-bar formatting. GitHub and the model are
 not called in the unit tests.
+Write the verdict with APPROVE/REQUEST CHANGES/COMMENT with a new line at the end of the review comment for better reading.

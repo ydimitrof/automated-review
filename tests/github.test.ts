@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validLinesForPatch, validateComments, hasReviewAtSha } from '../src/github.js';
+import { validLinesForPatch, validateComments, hasReviewAtSha, isRetryableGhError, ghBackoffMs } from '../src/github.js';
 import type { ChangedFile, ReviewComment } from '../src/types.js';
 
 // Files-API patch: starts at the first @@ hunk, no "+++" header.
@@ -54,4 +54,23 @@ test('hasReviewAtSha: true only when the reviewer reviewed this exact SHA', () =
   assert.equal(hasReviewAtSha(reviews, 'ydimitrof', 'HEAD1'), true);
   // someone else's review at head doesn't count
   assert.equal(hasReviewAtSha([{ login: 'other', commitId: 'HEAD1' }], 'ydimitrof', 'HEAD1'), false);
+});
+
+test('isRetryableGhError matches rate-limit / transient errors only', () => {
+  assert.equal(isRetryableGhError('gh: You have exceeded a secondary rate limit ... (HTTP 403)'), true);
+  assert.equal(isRetryableGhError('temporarily blocked from content creation'), true);
+  assert.equal(isRetryableGhError('API rate limit exceeded'), true);
+  assert.equal(isRetryableGhError('exited 1: HTTP 502'), true);
+  assert.equal(isRetryableGhError('HTTP 429'), true);
+  // not retryable — real client errors
+  assert.equal(isRetryableGhError('Validation Failed (HTTP 422)'), false);
+  assert.equal(isRetryableGhError('Not Found (HTTP 404)'), false);
+  assert.equal(isRetryableGhError('Problems parsing JSON (HTTP 400)'), false);
+});
+
+test('ghBackoffMs grows exponentially and caps at 5 min', () => {
+  // attempt 1 >= 30s, attempt 3 >= 120s, and never above cap + jitter
+  assert.ok(ghBackoffMs(1) >= 30_000 && ghBackoffMs(1) < 40_000);
+  assert.ok(ghBackoffMs(3) >= 120_000 && ghBackoffMs(3) < 160_000);
+  for (let n = 1; n <= 10; n++) assert.ok(ghBackoffMs(n) <= 300_000 * 1.25);
 });
