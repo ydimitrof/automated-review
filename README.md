@@ -330,6 +330,12 @@ scrolling above:
 Each bar ticks once per batch plus one for the synthesis step, then flashes
 `✓ …[████████████████] 20/20` on completion.
 
+Between passes, the wait is shown as a live countdown that ticks down in place:
+
+```
+⏳ next pass in 14:59 [████████████████████]
+```
+
 **Demo review block** (`demoMode`/`--dry-run`) — the exact review that would be
 posted:
 

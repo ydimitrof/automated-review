@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 
 process.env.NO_COLOR = '1'; // assert on plain text, not ANSI codes
 
-const { formatBarLine } = await import('../src/progress.js');
+const { formatBarLine, formatDuration } = await import('../src/progress.js');
+
+test('formatDuration renders MM:SS and H:MM:SS', () => {
+  assert.equal(formatDuration(899_000), '14:59');
+  assert.equal(formatDuration(0), '00:00');
+  assert.equal(formatDuration(5_000), '00:05');
+  assert.equal(formatDuration(3_661_000), '1:01:01');
+});
 
 test('formatBarLine renders gauge, counts, spinner and elapsed', () => {
   const bar = { label: 'owner/repo#7', total: 4, done: 1, startMs: 1000, finished: false };

@@ -17,6 +17,17 @@ interface Bar {
   finished: boolean;
 }
 
+/** Format a millisecond duration as `H:MM:SS` (or `MM:SS` under an hour). */
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 /** Pure bar formatter (exported for testing). `nowMs` and `frame` are injected. */
 export function formatBarLine(
   out: NodeJS.WriteStream,
@@ -38,6 +49,7 @@ export class ProgressManager {
   private readonly out = process.stdout;
   readonly enabled: boolean;
   private readonly bars = new Map<string, Bar>();
+  private status: string | null = null;
   private renderedLines = 0;
   private frame = 0;
   private timer: NodeJS.Timeout | null = null;
@@ -56,9 +68,10 @@ export class ProgressManager {
 
   private render(): void {
     this.clearRegion();
-    if (this.bars.size === 0) return;
     const now = Date.now();
     const lines = [...this.bars.values()].map((b) => formatBarLine(this.out, b, this.frame, now));
+    if (this.status) lines.push(this.status);
+    if (lines.length === 0) return;
     this.out.write(lines.join('\n') + '\n');
     this.renderedLines = lines.length;
   }
@@ -108,6 +121,20 @@ export class ProgressManager {
     this.stopTimerIfIdle();
   }
 
+  /** Set (or update) a persistent status line shown below the bars. */
+  setStatus(text: string): void {
+    if (!this.enabled) return;
+    this.status = text;
+    this.render();
+  }
+
+  /** Remove the status line. */
+  clearStatus(): void {
+    if (!this.enabled) return;
+    this.status = null;
+    this.render();
+  }
+
   /** Print text above the live region (log lines, demo blocks). */
   print(text: string): void {
     if (!this.enabled) {
@@ -123,6 +150,7 @@ export class ProgressManager {
   stop(): void {
     if (!this.enabled) return;
     this.bars.clear();
+    this.status = null;
     this.clearRegion();
     if (this.timer) {
       clearInterval(this.timer);

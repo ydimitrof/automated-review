@@ -20,7 +20,7 @@ import { packBatches } from './src/batch.js';
 import { mergeVerdicts, postEventFor } from './src/merge.js';
 import { Semaphore } from './src/pool.js';
 import { reviewBatch, synthesizeSummary } from './src/reviewer.js';
-import { ProgressManager } from './src/progress.js';
+import { ProgressManager, formatDuration } from './src/progress.js';
 import { log, paint, setLogSink } from './src/logger.js';
 import type { PullRequest, Review, ReviewComment, ResolvedRepo, State } from './src/types.js';
 
@@ -87,6 +87,31 @@ function sleep(ms: number): Promise<void> {
       res();
     };
   });
+}
+
+/**
+ * Sleep until the next pass, showing a live countdown (mm:ss + draining bar) on
+ * a TTY. Interruptible by shutdown. Falls back to a single log line off a TTY.
+ */
+async function countdownSleep(progress: ProgressManager, totalMs: number): Promise<void> {
+  if (!progress.enabled) {
+    log.info(`pass complete — sleeping ${Math.round(totalMs / 1000)}s`);
+    await sleep(totalMs);
+    return;
+  }
+  const out = process.stdout;
+  const width = 20;
+  const endAt = Date.now() + totalMs;
+  log.info(`pass complete — next pass in ${formatDuration(totalMs)}`);
+  while (!shuttingDown) {
+    const remaining = endAt - Date.now();
+    if (remaining <= 0) break;
+    const filled = Math.round((width * remaining) / totalMs);
+    const gauge = paint(out, 'green', '█'.repeat(filled)) + paint(out, 'dim', '░'.repeat(width - filled));
+    progress.setStatus(`${paint(out, 'cyan', '⏳ next pass in')} ${formatDuration(remaining)} [${gauge}]`);
+    await sleep(Math.min(1000, remaining));
+  }
+  progress.clearStatus();
 }
 
 function printDemoReview(
@@ -343,8 +368,7 @@ async function main(): Promise<void> {
     if (args.once || shuttingDown) break;
     const elapsed = Date.now() - startedAt;
     const wait = Math.max(0, intervalMs - elapsed);
-    log.info(`pass complete — sleeping ${Math.round(wait / 1000)}s`);
-    await sleep(wait);
+    await countdownSleep(progress, wait);
   } while (!shuttingDown);
 
   progress.stop();
